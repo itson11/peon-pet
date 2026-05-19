@@ -8,3 +8,10 @@ dist/
 docs/plans/
 
 *.DS_Store
+
+# Local-only handoff / Claude Code context
+CLAUDE.md
+
+# Local-only Windows launcher artifacts (user-specific paths)
+peon-pet.ico
+start-peon-pet.vbs
