@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, Menu, protocol, net, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, Menu, Tray, nativeImage, protocol, net, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -10,6 +10,7 @@ const {
 const { JsonlWatcher } = require('./lib/jsonl-watcher');
 
 let win;
+let tray = null;
 let petVisible = true;
 const subAgentWindows = new Map(); // session_id → BrowserWindow
 const subAgentCreatedAt = new Map(); // session_id → creation timestamp (ms)
@@ -346,6 +347,15 @@ function startMouseTrackingForWindow(targetWin) {
   }, 50);
 }
 
+function refreshAppMenu() {
+  const menu = buildDockMenu();
+  if (process.platform === 'darwin') {
+    app.dock.setMenu(menu);
+  } else if (tray && !tray.isDestroyed()) {
+    tray.setContextMenu(menu);
+  }
+}
+
 function buildDockMenu() {
   return Menu.buildFromTemplate([
     {
@@ -364,7 +374,7 @@ function buildDockMenu() {
           }
         }
         petVisible = !petVisible;
-        app.dock.setMenu(buildDockMenu());
+        refreshAppMenu();
       },
     },
     { type: 'separator' },
@@ -407,16 +417,39 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
 
+  const cfg2 = loadPetConfig();
+  const char2 = argCharacter || cfg2.character || 'orc';
+  const assetsDir2 = path.join(__dirname, 'renderer', 'assets');
+  const customIcon2 = path.join(app.getPath('userData'), 'characters', char2, 'dock-icon.png');
+  const charMap2 = BUNDLED_CHARS[char2] || {};
+  const iconFile2 = charMap2['dock-icon.png'] || BUNDLED_CHARS.orc['dock-icon.png'];
+  const iconPath2 = fs.existsSync(customIcon2) ? customIcon2 : path.join(assetsDir2, iconFile2);
+
   if (process.platform === 'darwin') {
-    const cfg = loadPetConfig();
-    const char = argCharacter || cfg.character || 'orc';
-    const assetsDir = path.join(__dirname, 'renderer', 'assets');
-    const customIcon = path.join(app.getPath('userData'), 'characters', char, 'dock-icon.png');
-    const charMap = BUNDLED_CHARS[char] || {};
-    const iconFile = charMap['dock-icon.png'] || BUNDLED_CHARS.orc['dock-icon.png'];
-    const iconPath = fs.existsSync(customIcon) ? customIcon : path.join(assetsDir, iconFile);
-    app.dock.setIcon(iconPath);
+    app.dock.setIcon(iconPath2);
     app.dock.setMenu(buildDockMenu());
+  } else {
+    // Windows/Linux: system tray icon for Hide/Show/Quit
+    const trayImage = nativeImage.createFromPath(iconPath2);
+    tray = new Tray(trayImage.isEmpty() ? nativeImage.createEmpty() : trayImage);
+    tray.setToolTip('Peon Pet');
+    tray.setContextMenu(buildDockMenu());
+    tray.on('click', () => {
+      if (!win || win.isDestroyed()) return;
+      if (petVisible) {
+        win.hide();
+        for (const [, subWin] of subAgentWindows) {
+          if (!subWin.isDestroyed()) subWin.hide();
+        }
+      } else {
+        win.show();
+        for (const [, subWin] of subAgentWindows) {
+          if (!subWin.isDestroyed()) subWin.show();
+        }
+      }
+      petVisible = !petVisible;
+      refreshAppMenu();
+    });
   }
 
   if (process.argv.includes('--dev')) {
